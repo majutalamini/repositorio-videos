@@ -9,7 +9,7 @@ const ICON_LINK = '<svg class="ic" viewBox="0 0 24 24"><path d="M10 14a4 4 0 0 0
 const ICON_OPEN = '<svg class="ic" viewBox="0 0 24 24"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg>';
 const ICON_EDIT = '<svg class="ic" viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16z"/></svg>';
 
-let links = [], tpl = DEF_TPL, cat = '', editing = null, db = null, col = null, cfgRef = null, local = false, shown = [];
+let links = [], tpl = DEF_TPL, cat = '', editing = null, local = false, shown = [], loading = true;
 
 const bs = window.bootstrap;
 const modal = id => bs ? bs.Modal.getOrCreateInstance($(id)) : null;
@@ -105,21 +105,28 @@ function render(){
       </div>
     </article>`).join('');
 
-  $('empty').innerHTML = !links.length
+  $('empty').innerHTML = loading ? '' : !links.length
     ? `<div class="vazio rounded-4 text-center p-5 mt-2"><h2 class="h4 fw-bold">Sua biblioteca está vazia</h2><p class="text-body-secondary">Adicione o primeiro vídeo ou cole a lista que hoje está no Discord.</p>
        <div class="d-flex flex-wrap justify-content-center gap-2"><button class="btn btn-success fw-semibold" data-e="new">Novo vídeo</button><button class="btn btn-outline-light" data-e="imp">Importar lista</button></div></div>`
     : !r.length ? `<div class="vazio rounded-4 text-center p-5 mt-2"><h2 class="h5 fw-bold">Nada encontrado</h2><p class="text-body-secondary mb-0">Tente outra palavra${cat?' ou remova o filtro de categoria':''}.</p></div>` : '';
 }
 
 /* ---------- armazenamento ---------- */
+// Na Vercel os dados ficam no banco (api/links.js); aberto direto do computador, no navegador.
+const API='/api/links';
 function persist(){ try{ localStorage.setItem('videoteca', JSON.stringify({links,tpl})); }catch(e){} }
-async function saveLink(l){
-  if(local){ const i=links.findIndex(x=>x.id===l.id); i>-1?links[i]=l:links.push(l); persist(); render(); return; }
-  const {id,...body}=l; await col.doc(id).set(body);
+async function api(body){
+  const r=await fetch(API,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  const d=await r.json().catch(()=>({}));
+  if(!r.ok) throw new Error(d.erro||'Não foi possível salvar. Tente de novo.');
+  return d;
 }
-async function delLink(id){ if(local){ links=links.filter(x=>x.id!==id); persist(); render(); return; } await col.doc(id).delete(); }
-async function saveTpl(t){ tpl=t; if(local){ persist(); render(); return; } await cfgRef.set({modelo:t}); }
-function fail(e){ toast(e&&e.code==='invalid_argument' ? 'Você não tem permissão para alterar esta biblioteca.' : e&&e.code==='quota_exceeded' ? 'Limite de armazenamento atingido.' : 'Não foi possível salvar. Tente de novo.'); }
+function putLocal(l){ const i=links.findIndex(x=>x.id===l.id); i>-1?links[i]=l:links.push(l); }
+async function saveLink(l){ if(!local) await api({acao:'salvar',link:l}); putLocal(l); if(local) persist(); render(); }
+async function saveMany(ls){ if(!local) await api({acao:'importar',links:ls}); ls.forEach(putLocal); if(local) persist(); render(); }
+async function delLink(id){ if(!local) await api({acao:'excluir',id}); links=links.filter(x=>x.id!==id); if(local) persist(); render(); }
+async function saveTpl(t){ if(!local) await api({acao:'modelo',texto:t}); tpl=t; if(local) persist(); render(); }
+function fail(e){ toast(e&&e.message ? e.message : 'Não foi possível salvar. Tente de novo.'); }
 
 /* ---------- copiar ---------- */
 async function copy(text){
@@ -131,8 +138,8 @@ async function doCopy(l, onlyUrl){
   const ok = await copy(onlyUrl ? l.url : message(l));
   toast(ok ? (onlyUrl ? 'Link copiado' : 'Mensagem com link copiada, é só colar para o cliente') : 'O navegador bloqueou a cópia');
   if(!ok) return;
-  if(local){ l.copiadoEm=Date.now(); persist(); }
-  else { try{ await col.doc(l.id).update({copiadoEm:Date.now()}); }catch(e){} }
+  l.copiadoEm=Date.now();
+  if(local) persist(); else api({acao:'copiado',id:l.id}).catch(()=>{});
 }
 
 /* ---------- novo / editar ---------- */
@@ -179,7 +186,7 @@ $('fImp').addEventListener('submit', async e=>{ e.preventDefault(); const def=$(
     out.push({id:uid(), titulo, url, categoria, tags:'', mensagem:'', criadoEm:Date.now()});
   }
   if(!out.length) return showErr('iE', bad?'Nenhuma linha reconhecida. Cada linha precisa de um título e um link.':'Nada novo para importar.');
-  try{ for(const l of out) await saveLink(l); modal('mImp')?.hide(); $('iT').value='';
+  try{ await saveMany(out); modal('mImp')?.hide(); $('iT').value='';
     toast(`${out.length} vídeo${out.length>1?'s':''} importado${out.length>1?'s':''}${bad?` · ${bad} linha(s) ignorada(s)`:''}`); }catch(err){ fail(err); } });
 
 /* ---------- eventos gerais ---------- */
@@ -195,25 +202,39 @@ $('empty').addEventListener('click',e=>{ const b=e.target.closest('[data-e]'); i
 
 /* ---------- inicialização ---------- */
 const LOCAL_MSG='Modo local: os vídeos ficam salvos só neste navegador.';
-function useLocal(){
-  local=true; try{ const d=JSON.parse(localStorage.getItem('videoteca')||'{}'); links=d.links||[]; tpl=d.tpl||DEF_TPL; }catch(e){}
-  $('mode').textContent=LOCAL_MSG; render();
+const NUVEM_MSG='Salvo na nuvem: todo mundo com o link vê os mesmos vídeos.';
+function readLocal(){ try{ const d=JSON.parse(localStorage.getItem('videoteca')||'{}'); return {links:Array.isArray(d.links)?d.links:[], tpl:d.tpl||''}; }catch(e){ return {links:[],tpl:''}; } }
+function useLocal(){ local=true; loading=false; const d=readLocal(); links=d.links; tpl=d.tpl||DEF_TPL; $('mode').textContent=LOCAL_MSG; render(); }
+
+async function load(){
+  const r=await fetch(API,{cache:'no-store'});
+  const ct=r.headers.get('content-type')||'';
+  if(!r.ok||!ct.includes('json')) throw new Error('sem api');
+  const d=await r.json();
+  links=d.links.filter(l=>typeof l.titulo==='string'&&typeof l.url==='string');
+  tpl=d.modelo||DEF_TPL; loading=false;
+  if(!document.querySelector('.modal.show')) render();
 }
+
+// Vídeos que ficaram salvos só neste navegador (antes do banco) podem ser enviados para a nuvem.
+function offerLocal(){
+  const pend=readLocal().links.filter(l=>l&&l.titulo&&l.url&&!links.some(x=>x.url===l.url));
+  if(!pend.length){ $('mode').textContent=NUVEM_MSG; return; }
+  $('mode').innerHTML=`${NUVEM_MSG} Há ${pend.length} vídeo${pend.length>1?'s':''} salvo${pend.length>1?'s':''} só neste navegador. <button type="button" class="btn btn-link btn-sm p-0 align-baseline" id="bSync">Enviar para a nuvem</button>`;
+  $('bSync').onclick=async()=>{
+    try{ await saveMany(pend.map(l=>({id:l.id||uid(),titulo:l.titulo,url:l.url,categoria:l.categoria||'',tags:l.tags||'',mensagem:l.mensagem||'',criadoEm:l.criadoEm||Date.now()})));
+      localStorage.removeItem('videoteca'); $('mode').textContent=NUVEM_MSG; toast('Vídeos enviados para a nuvem'); }catch(err){ fail(err); }
+  };
+}
+
 render();
-{
-  const timer=setTimeout(()=>{ if(!db) useLocal(); },10000);
-  (async()=>{
-    // Dentro do claude.ai os dados ficam na nuvem; fora dele (hospedado por você), no navegador.
-    for(let i=0;i<20 && !(window.claude && typeof window.claude.use==='function');i++) await new Promise(r=>setTimeout(r,100));
-    try{ db = window.claude ? await window.claude.use('db') : null; }catch(e){ db=null; }
-    clearTimeout(timer);
-    if(!db) return useLocal();
-    local=false; col=db.collection('links'); cfgRef=db.doc('config/geral');
-    const lt=setTimeout(()=>{ $('mode').textContent='Não foi possível carregar os vídeos ainda. Verifique sua conexão.'; },10000);
-    col.onSnapshot(s=>{ if(!s.metadata.fromCache){ clearTimeout(lt); $('mode').textContent='Salvo na nuvem: os vídeos aparecem em qualquer dispositivo.'; }
-      links=s.docs.map(d=>({id:d.id,...d.data()})).filter(l=>typeof l.titulo==='string'&&typeof l.url==='string'); render(); },
-      ()=>{ clearTimeout(lt); $('mode').textContent='A conexão com os dados caiu. Recarregue a página.'; });
-    cfgRef.onSnapshot(d=>{ const m=d.exists&&d.data().modelo; tpl=typeof m==='string'&&m?m:DEF_TPL; render(); },()=>{});
-  })();
-}
+(async()=>{
+  $('mode').textContent='Carregando vídeos…';
+  try{ await load(); }catch(e){ return useLocal(); }
+  local=false; offerLocal();
+  // Atualiza a lista quando alguém mais altera: ao voltar para a aba e a cada 30 s com ela aberta.
+  const refresh=()=>{ if(!document.hidden) load().catch(()=>{}); };
+  document.addEventListener('visibilitychange',refresh);
+  setInterval(refresh,30000);
+})();
 }
