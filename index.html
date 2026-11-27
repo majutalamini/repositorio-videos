@@ -71,6 +71,7 @@
       <div class="modal-body d-flex flex-column gap-3">
         <div><label class="form-label" for="fT">Título do vídeo</label><input class="form-control" id="fT" required maxlength="160" placeholder="Cancelar um título financeiro"></div>
         <div><label class="form-label" for="fU">Link</label><input class="form-control" id="fU" type="url" required placeholder="https://youtu.be/…"></div>
+        <div><label class="form-label" for="fD">De quem é o vídeo</label><select class="form-select" id="fD" required><option value="">Selecione…</option></select></div>
         <div><label class="form-label" for="fC">Categoria</label><input class="form-control" id="fC" list="catList" maxlength="60" placeholder="Next Fit Pay, Contratos…"><datalist id="catList"></datalist></div>
         <div><label class="form-label" for="fK">Palavras-chave <span class="text-body-secondary fw-normal">(opcional)</span></label><input class="form-control" id="fK" maxlength="200" placeholder="estorno, boleto, inadimplência"><div class="form-text">Separadas por vírgula. Ajudam a busca a encontrar o vídeo.</div></div>
         <div><label class="form-label" for="fM">Mensagem própria <span class="text-body-secondary fw-normal">(opcional)</span></label><textarea class="form-control" id="fM" rows="3" maxlength="1000"></textarea><div class="form-text">Em branco, usa a mensagem padrão.</div></div>
@@ -117,7 +118,10 @@
         <div><label class="form-label" for="iT">Cole um vídeo por linha</label>
           <textarea class="form-control font-monospace small" id="iT" rows="8" placeholder="Cancelar um título financeiro | https://youtu.be/abc | Next Fit Pay&#10;Como assinar um contrato - https://youtu.be/xyz"></textarea>
           <div class="form-text">Formato: <code>Título | link | categoria</code> (categoria opcional). Linhas no estilo do Discord, como <code>Título - https://…</code>, também funcionam.</div></div>
-        <div><label class="form-label" for="iC">Categoria para linhas sem categoria</label><input class="form-control" id="iC" list="catList" maxlength="60"></div>
+        <div class="row g-3">
+          <div class="col-sm"><label class="form-label" for="iD">De quem são os vídeos</label><select class="form-select" id="iD" required><option value="">Selecione…</option></select></div>
+          <div class="col-sm"><label class="form-label" for="iC">Categoria para linhas sem categoria</label><input class="form-control" id="iC" list="catList" maxlength="60"></div>
+        </div>
         <div class="alert alert-danger py-2 mb-0 d-none" id="iE"></div>
       </div>
       <div class="modal-footer"><button type="button" class="btn btn-outline-light" data-bs-dismiss="modal">Cancelar</button><button class="btn btn-success fw-semibold" type="submit">Importar</button></div>

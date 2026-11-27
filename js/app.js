@@ -2,6 +2,7 @@
 // Os componentes visuais (modais e toast) são do Bootstrap 5; aqui fica só a lógica da aplicação.
 {
 const $ = id => document.getElementById(id);
+const DONOS_INICIAIS = ['Kauã', 'Maria Julia', 'Central de ajuda'];
 const DEF_TPL = 'Confira esse vídeo que eu preparei sobre {titulo}:\n{link}';
 const STOP = new Set('de da do das dos o a os as e em no na nos nas um uma uns umas para pra por com como que se ao aos sobre video videos'.split(' '));
 const ICON_COPY = '<svg class="ic" viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a1 1 0 0 1 1-1h10"/></svg>';
@@ -9,7 +10,7 @@ const ICON_LINK = '<svg class="ic" viewBox="0 0 24 24"><path d="M10 14a4 4 0 0 0
 const ICON_OPEN = '<svg class="ic" viewBox="0 0 24 24"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg>';
 const ICON_EDIT = '<svg class="ic" viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16z"/></svg>';
 
-let links = [], tpl = DEF_TPL, cat = '', editing = null, local = false, shown = [], loading = true;
+let links = [], tpl = DEF_TPL, cat = '', editing = null, local = false, shown = [], loading = true, donos = [...DONOS_INICIAIS];
 
 const bs = window.bootstrap;
 const modal = id => bs ? bs.Modal.getOrCreateInstance($(id)) : null;
@@ -31,7 +32,7 @@ function lev(a,b){ if(Math.abs(a.length-b.length)>2) return 9; let p=[...Array(b
 
 function score(l, toks){
   if(!toks.length) return {s:1,m:[]};
-  const tw = words(l.titulo), ow = words((l.categoria||'')+' '+(l.tags||'')), hay = norm(l.titulo+' '+(l.categoria||'')+' '+(l.tags||''));
+  const tw = words(l.titulo), ow = words((l.categoria||'')+' '+(l.tags||'')+' '+(l.dono||'')), hay = norm(l.titulo+' '+(l.categoria||'')+' '+(l.tags||'')+' '+(l.dono||''));
   let s=0, hit=0; const m=[];
   for(const t of toks){
     const tol = t.length>6 ? 2 : 1;
@@ -90,6 +91,7 @@ function render(){
           <div class="col-lg">
             <div class="d-flex flex-wrap align-items-center gap-2 mb-1">
               <span class="badge rounded-pill text-bg-success">${esc(l.categoria||'Sem categoria')}</span>
+              ${l.dono?`<span class="small text-body-secondary">${esc(l.dono)}</span>`:''}
               ${i===0&&toks.length?'<span class="small text-success">Enter copia este</span>':''}
             </div>
             <h3 class="h6 fw-semibold mb-1">${highlight(l.titulo,m)}</h3>
@@ -114,7 +116,7 @@ function render(){
 /* ---------- armazenamento ---------- */
 // Na Vercel os dados ficam no banco (api/links.js); aberto direto do computador, no navegador.
 const API='/api/links';
-function persist(){ try{ localStorage.setItem('videoteca', JSON.stringify({links,tpl})); }catch(e){} }
+function persist(){ try{ localStorage.setItem('videoteca', JSON.stringify({links,tpl,donos})); }catch(e){} }
 async function api(body){
   const r=await fetch(API,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
   const d=await r.json().catch(()=>({}));
@@ -143,18 +145,49 @@ async function doCopy(l, onlyUrl){
 }
 
 /* ---------- novo / editar ---------- */
-function formVal(){ return {titulo:$('fT').value.trim(), url:$('fU').value.trim(), categoria:$('fC').value.trim(), tags:$('fK').value.trim(), mensagem:$('fM').value.trim()}; }
+/* ---------- donos ---------- */
+const NOVO='__novo';
+function fillDonos(){
+  for(const id of ['fD','iD']){ const sel=$(id), cur=sel.value;
+    sel.innerHTML='<option value="">Selecione…</option>'+donos.map(d=>`<option value="${esc(d)}">${esc(d)}</option>`).join('')+`<option value="${NOVO}">+ Novo dono…</option>`;
+    sel.value=cur&&cur!==NOVO&&donos.includes(cur)?cur:''; }
+}
+// Caixa para criar um dono, aberta ao escolher "+ Novo dono…" no campo de seleção.
+for(const id of ['fD','iD']){
+  const sel=$(id);
+  sel.insertAdjacentHTML('afterend', `<div class="input-group mt-2 d-none" id="${id}Box">
+    <input class="form-control" id="${id}Nome" maxlength="60" placeholder="Nome do novo dono" aria-label="Nome do novo dono">
+    <button type="button" class="btn btn-success" id="${id}Ok">Adicionar</button>
+    <button type="button" class="btn btn-outline-light" id="${id}No">Cancelar</button></div>`);
+  const box=$(id+'Box'), inp=$(id+'Nome'), err=id==='fD'?'fE':'iE';
+  const close=()=>{ box.classList.add('d-none'); inp.value=''; };
+  sel.addEventListener('change',()=>{ if(sel.value===NOVO){ sel.value=''; box.classList.remove('d-none'); inp.focus(); } else close(); });
+  const add=async()=>{ const nome=inp.value.trim().replace(/\s+/g,' '); if(!nome) return inp.focus();
+    try{ const n=await addDono(nome); fillDonos(); sel.value=n; close(); showErr(err,''); toast(`Dono “${n}” adicionado`); }catch(e){ showErr(err,e.message||'Não foi possível adicionar o dono.'); } };
+  $(id+'Ok').onclick=add; $(id+'No').onclick=close;
+  inp.addEventListener('keydown',e=>{ if(e.key==='Enter'){ e.preventDefault(); add(); } if(e.key==='Escape'){ e.preventDefault(); e.stopPropagation(); close(); } });
+  sel.closest('.modal').addEventListener('hidden.bs.modal',close);
+}
+async function addDono(nome){
+  const igual=donos.find(d=>d.localeCompare(nome,'pt-BR',{sensitivity:'accent'})===0);
+  if(igual) return igual;
+  if(local){ donos.push(nome); persist(); return nome; }
+  const r=await api({acao:'dono',nome}); if(!donos.includes(r.nome)) donos.push(r.nome); return r.nome;
+}
+fillDonos();
+function formVal(){ return {titulo:$('fT').value.trim(), url:$('fU').value.trim(), categoria:$('fC').value.trim(), tags:$('fK').value.trim(), mensagem:$('fM').value.trim(), dono:$('fD').value}; }
 function prevLink(){ const v=formVal(); $('fP').textContent=message({...v, titulo:v.titulo||'título do vídeo', url:v.url||'https://…'}); }
 function openLink(l){
   editing=l||null; $('mLinkT').textContent=l?'Editar vídeo':'Novo vídeo';
   $('fDel').classList.toggle('d-none',!l); $('fDelBox').classList.add('d-none'); showErr('fE',''); delete $('fE').dataset.ok;
-  $('fT').value=l?.titulo||''; $('fU').value=l?.url||''; $('fC').value=l?.categoria||(cat&&cat!=='Sem categoria'?cat:''); $('fK').value=l?.tags||''; $('fM').value=l?.mensagem||'';
+  $('fT').value=l?.titulo||''; $('fU').value=l?.url||''; $('fC').value=l?.categoria||(cat&&cat!=='Sem categoria'?cat:''); $('fK').value=l?.tags||''; $('fM').value=l?.mensagem||''; $('fD').value=donos.includes(l?.dono)?l.dono:'';
   prevLink(); modal('mLink')?.show();
 }
 ['fT','fU','fC','fM'].forEach(id=>$(id).addEventListener('input',prevLink));
 $('mLink').addEventListener('shown.bs.modal',()=>$('fT').focus());
 $('fLink').addEventListener('submit', async e=>{ e.preventDefault(); const v=formVal();
   if(!v.titulo) return showErr('fE','Informe o título.');
+  if(!donos.includes(v.dono)) return showErr('fE','Selecione de quem é o vídeo.');
   if(!/^https?:\/\/\S+$/i.test(v.url)) return showErr('fE','O link precisa começar com https://');
   const dup=links.find(x=>x.url===v.url && x.id!==editing?.id);
   if(dup && !$('fE').dataset.ok){ $('fE').dataset.ok='1'; return showErr('fE',`Este link já está salvo como “${dup.titulo}”. Clique em Salvar de novo para manter os dois.`); }
@@ -174,7 +207,8 @@ $('fCfg').addEventListener('submit', async e=>{ e.preventDefault(); try{ await s
 /* ---------- importar ---------- */
 $('mImp').addEventListener('show.bs.modal',()=>showErr('iE',''));
 $('mImp').addEventListener('shown.bs.modal',()=>$('iT').focus());
-$('fImp').addEventListener('submit', async e=>{ e.preventDefault(); const def=$('iC').value.trim(), out=[]; let bad=0;
+$('fImp').addEventListener('submit', async e=>{ e.preventDefault(); const def=$('iC').value.trim(), dono=$('iD').value, out=[]; let bad=0;
+  if(!donos.includes(dono)) return showErr('iE','Selecione de quem são os vídeos.');
   for(const raw of $('iT').value.split('\n')){ const line=raw.trim(); if(!line) continue;
     const um=line.match(/https?:\/\/\S+/i); if(!um){ bad++; continue; }
     let titulo, categoria=def;
@@ -183,7 +217,7 @@ $('fImp').addEventListener('submit', async e=>{ e.preventDefault(); const def=$(
     const url=um[0].replace(/[)>,.]+$/,'');
     if(!titulo){ bad++; continue; }
     if(links.some(x=>x.url===url)||out.some(x=>x.url===url)) continue;
-    out.push({id:uid(), titulo, url, categoria, tags:'', mensagem:'', criadoEm:Date.now()});
+    out.push({id:uid(), titulo, url, categoria, dono, tags:'', mensagem:'', criadoEm:Date.now()});
   }
   if(!out.length) return showErr('iE', bad?'Nenhuma linha reconhecida. Cada linha precisa de um título e um link.':'Nada novo para importar.');
   try{ await saveMany(out); modal('mImp')?.hide(); $('iT').value='';
@@ -203,8 +237,8 @@ $('empty').addEventListener('click',e=>{ const b=e.target.closest('[data-e]'); i
 /* ---------- inicialização ---------- */
 const LOCAL_MSG='Modo local: os vídeos ficam salvos só neste navegador.';
 const NUVEM_MSG='Salvo na nuvem: todo mundo com o link vê os mesmos vídeos.';
-function readLocal(){ try{ const d=JSON.parse(localStorage.getItem('videoteca')||'{}'); return {links:Array.isArray(d.links)?d.links:[], tpl:d.tpl||''}; }catch(e){ return {links:[],tpl:''}; } }
-function useLocal(){ local=true; loading=false; const d=readLocal(); links=d.links; tpl=d.tpl||DEF_TPL; $('mode').textContent=LOCAL_MSG; render(); }
+function readLocal(){ try{ const d=JSON.parse(localStorage.getItem('videoteca')||'{}'); return {links:Array.isArray(d.links)?d.links:[], tpl:d.tpl||'', donos:Array.isArray(d.donos)&&d.donos.length?d.donos:null}; }catch(e){ return {links:[],tpl:'',donos:null}; } }
+function useLocal(){ local=true; loading=false; const d=readLocal(); links=d.links; tpl=d.tpl||DEF_TPL; if(d.donos) donos=d.donos; fillDonos(); $('mode').textContent=LOCAL_MSG; render(); }
 
 async function load(){
   const r=await fetch(API,{cache:'no-store'});
@@ -213,6 +247,7 @@ async function load(){
   const d=await r.json();
   links=d.links.filter(l=>typeof l.titulo==='string'&&typeof l.url==='string');
   tpl=d.modelo||DEF_TPL; loading=false;
+  if(Array.isArray(d.donos)&&d.donos.length){ donos=d.donos; fillDonos(); }
   if(!document.querySelector('.modal.show')) render();
 }
 
@@ -222,7 +257,7 @@ function offerLocal(){
   if(!pend.length){ $('mode').textContent=NUVEM_MSG; return; }
   $('mode').innerHTML=`${NUVEM_MSG} Há ${pend.length} vídeo${pend.length>1?'s':''} salvo${pend.length>1?'s':''} só neste navegador. <button type="button" class="btn btn-link btn-sm p-0 align-baseline" id="bSync">Enviar para a nuvem</button>`;
   $('bSync').onclick=async()=>{
-    try{ await saveMany(pend.map(l=>({id:l.id||uid(),titulo:l.titulo,url:l.url,categoria:l.categoria||'',tags:l.tags||'',mensagem:l.mensagem||'',criadoEm:l.criadoEm||Date.now()})));
+    try{ await saveMany(pend.map(l=>({id:l.id||uid(),titulo:l.titulo,url:l.url,categoria:l.categoria||'',dono:l.dono||'',tags:l.tags||'',mensagem:l.mensagem||'',criadoEm:l.criadoEm||Date.now()})));
       localStorage.removeItem('videoteca'); $('mode').textContent=NUVEM_MSG; toast('Vídeos enviados para a nuvem'); }catch(err){ fail(err); }
   };
 }
