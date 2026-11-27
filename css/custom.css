@@ -76,6 +76,14 @@ kbd { background: var(--bs-secondary-bg); color: var(--bs-secondary-color); bord
 .video .msg { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; white-space: pre-line; }
 mark { border-radius: 4px; padding: 0 2px; }
 
+/* Dono do vídeo: bolinha com a inicial + nome */
+.dono { display: inline-flex; align-items: center; gap: .4rem; }
+.avatar {
+  width: 22px; height: 22px; border-radius: 50%; display: inline-grid; place-items: center; flex: none;
+  font-size: .7rem; font-weight: 600; line-height: 1;
+  color: hsl(var(--h) 70% 82%); background: hsl(var(--h) 25% 20%); border: 1px solid hsl(var(--h) 25% 30%);
+}
+
 .prev { background: var(--bs-secondary-bg); border: 1px dashed var(--bs-border-color); white-space: pre-line; overflow-wrap: anywhere; font-size: .925rem; }
 #iT { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
 

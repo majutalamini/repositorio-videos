@@ -91,7 +91,7 @@ function render(){
           <div class="col-lg">
             <div class="d-flex flex-wrap align-items-center gap-2 mb-1">
               <span class="badge rounded-pill text-bg-success">${esc(l.categoria||'Sem categoria')}</span>
-              ${l.dono?`<span class="small text-body-secondary">${esc(l.dono)}</span>`:''}
+              ${l.dono?`<span class="dono small text-body-secondary">${avatar(l.dono)}${esc(l.dono)}</span>`:''}
               ${i===0&&toks.length?'<span class="small text-success">Enter copia este</span>':''}
             </div>
             <h3 class="h6 fw-semibold mb-1">${highlight(l.titulo,m)}</h3>
@@ -146,6 +146,12 @@ async function doCopy(l, onlyUrl){
 
 /* ---------- novo / editar ---------- */
 /* ---------- donos ---------- */
+// Bolinha com a inicial do dono; a cor sai do nome, então cada dono mantém sempre a mesma.
+function avatar(nome){
+  const ini=[...nome.trim()][0]?.toUpperCase()||'?';
+  let h=0; for(const c of norm(nome)) h=(h*31+c.charCodeAt(0))%360;
+  return `<span class="avatar" style="--h:${h}" aria-hidden="true">${esc(ini)}</span>`;
+}
 const NOVO='__novo';
 function fillDonos(){
   for(const id of ['fD','iD']){ const sel=$(id), cur=sel.value;
